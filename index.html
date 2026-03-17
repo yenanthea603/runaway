@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>超市跑酷：殭屍危機與單字大作戰</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #333;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none; /* 防止手機瀏覽器預設滑動行為 */
+        }
+        #gameContainer {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #222;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        /* UI 疊層 */
+        #uiLayer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* 讓點擊穿透到 Canvas */
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        .top-bar {
+            display: flex;
+            justify-content: space-between;
+            padding: 15px;
+            color: white;
+            font-size: 20px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        }
+        #questionBox {
+            text-align: center;
+            background: rgba(0, 0, 0, 0.7);
+            color: #FFD700;
+            padding: 10px 20px;
+            border-radius: 15px;
+            font-size: 24px;
+            margin: 10px auto;
+            border: 2px solid #FFD700;
+            box-shadow: 0 0 10px #FFD700;
+        }
+        .pinyin {
+            font-size: 16px;
+            color: #FFF;
+            display: block;
+        }
+        /* 覆蓋畫面 (開始與結束) */
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            color: white;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            pointer-events: auto;
+            z-index: 10;
+        }
+        .overlay h1 {
+            color: #4CAF50;
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+        .overlay p {
+            font-size: 18px;
+            margin: 5px 20px;
+            line-height: 1.5;
+        }
+        button {
+            margin-top: 30px;
+            padding: 15px 40px;
+            font-size: 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 30px;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            transition: transform 0.1s;
+        }
+        button:active {
+            transform: scale(0.95);
+        }
+        .hidden {
+            display: none !important;
+        }
+        #flashScreen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: red;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.1s;
+        }
+    </style>
+</head>
+<body>
+
+<div id="gameContainer">
+    <canvas id="gameCanvas"></canvas>
+    
+    <div id="uiLayer">
+        <div class="top-bar">
+            <div id="livesDisplay">❤️❤️❤️❤️❤️</div>
+            <div id="scoreDisplay">分數: 0</div>
+        </div>
+        <div id="questionBox" class="hidden">
+            <span id="qHanzi">準備中...</span>
+            <span id="qPinyin" class="pinyin"></span>
+        </div>
+        <div style="flex-grow: 1;"></div>
+    </div>
+
+    <div id="flashScreen"></div>
+
+    <div id="startScreen" class="overlay">
+        <h1>超市殭屍跑酷</h1>
+        <p>逃離飢餓的殭屍！🏃</p>
+        <p>收集畫面上方提示的<b>正確食材</b>來生存。</p>
+        <p>吃到錯誤食材或撞到殭屍 🧟 會扣除生命。</p>
+        <p style="color:#FFD700; margin-top:15px;">裝備道具：<br>👟 衝刺鞋 (無敵破壞)<br>🧲 磁鐵 (自動吸附正確食材)</p>
+        <p style="font-size: 14px; color: #aaa; margin-top:20px;">操作：鍵盤左右鍵 / 螢幕左右滑動或點擊</p>
+        <button id="startBtn">開始遊戲</button>
+    </div>
+
+    <div id="gameOverScreen" class="overlay hidden">
+        <h1 style="color: #F44336;">遊戲結束！</h1>
+        <p id="finalScore">最終分數: 0</p>
+        <button id="restartBtn">再玩一次</button>
+    </div>
+</div>
+
+<script>
+/**
+ * 遊戲設定與生詞庫 (中級華語 / 食材主題)
+ * 若未來有真實圖片，可將 emoji 替換為圖片 Image 物件
+ */
+const vocabList = [
+    { hanzi: '蘋果', pinyin: 'píng guǒ', emoji: '🍎' },
+    { hanzi: '牛奶', pinyin: 'niú nǎi', emoji: '🥛' },
+    { hanzi: '麵包', pinyin: 'miàn bāo', emoji: '🍞' },
+    { hanzi: '雞蛋', pinyin: 'jī dàn', emoji: '🥚' },
+    { hanzi: '牛肉', pinyin: 'niú ròu', emoji: '🥩' },
+    { hanzi: '青菜', pinyin: 'qīng cài', emoji: '🥬' },
+    { hanzi: '香蕉', pinyin: 'xiāng jiāo', emoji: '🍌' },
+    { hanzi: '西瓜', pinyin: 'xī guā', emoji: '🍉' },
+    { hanzi: '鹽巴', pinyin: 'yán bā', emoji: '🧂' },
+    { hanzi: '起司', pinyin: 'qǐ sī', emoji: '🧀' }
+];
+
+const praiseWords = ["太棒了！", "正確！", "非常好！", "好極了！", "滿分！"];
+
+// 遊戲狀態與變數
+let canvas, ctx;
+let gameState = 'start'; // start, playing, gameover
+let width, height, laneWidth;
+let score = 0;
+let lives = 5;
+let baseSpeed = 4;
+let currentSpeed = baseSpeed;
+let distanceSinceLastSpawn = 0;
+
+let currentQuestion = null;
+
+// 遊戲物件
+let player = {
+    lane: 1, // 0: 左, 1: 中, 2: 右
+    y: 0, // 在 init() 中設定為靠近底部
+    size: 40,
+    emoji: '🏃',
+    dashTimer: 0,
+    magnetTimer: 0
+};
+let entities = []; // 跑道上的障礙物/道具
+let particles = []; // 讚揚文字或特效
+
+// DOM 元素
+const ui_lives = document.getElementById('livesDisplay');
+const ui_score = document.getElementById('scoreDisplay');
+const ui_qBox = document.getElementById('questionBox');
+const ui_qHanzi = document.getElementById('qHanzi');
+const ui_qPinyin = document.getElementById('qPinyin');
+const screen_start = document.getElementById('startScreen');
+const screen_over = document.getElementById('gameOverScreen');
+const screen_flash = document.getElementById('flashScreen');
+
+// 初始化
+function init() {
+    canvas = document.getElementById('gameCanvas');
+    ctx = canvas.getContext('2d');
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    document.getElementById('startBtn').addEventListener('click', startGame);
+    document.getElementById('restartBtn').addEventListener('click', startGame);
+
+    setupInputs();
+    requestAnimationFrame(gameLoop);
+}
+
+function resizeCanvas() {
+    width = document.getElementById('gameContainer').clientWidth;
+    height = document.getElementById('gameContainer').clientHeight;
+    canvas.width = width;
+    canvas.height = height;
+    laneWidth = width / 3;
+    player.y = height - 120;
+    player.size = Math.min(laneWidth * 0.6, 60);
+}
+
+// 控制輸入 (鍵盤與觸控)
+function setupInputs() {
+    // 鍵盤
+    window.addEventListener('keydown', (e) => {
+        if (gameState !== 'playing') return;
+        if (e.key === 'ArrowLeft') movePlayer(-1);
+        if (e.key === 'ArrowRight') movePlayer(1);
+    });
+
+    // 觸控
+    let touchStartX = 0;
+    canvas.addEventListener('touchstart', (e) => {
+        if (gameState !== 'playing') return;
+        touchStartX = e.changedTouches[0].screenX;
+    }, {passive: true});
+
+    canvas.addEventListener('touchend', (e) => {
+        if (gameState !== 'playing') return;
+        let touchEndX = e.changedTouches[0].screenX;
+        let diffX = touchEndX - touchStartX;
+        
+        // 滑動判定 (>30px)
+        if (Math.abs(diffX) > 30) {
+            if (diffX > 0) movePlayer(1);
+            else movePlayer(-1);
+        } else {
+            // 點擊判定：點左半邊或右半邊
+            if (touchEndX < width / 2) movePlayer(-1);
+            else movePlayer(1);
+        }
+    }, {passive: true});
+}
+
+function movePlayer(dir) {
+    player.lane += dir;
+    if (player.lane < 0) player.lane = 0;
+    if (player.lane > 2) player.lane = 2;
+}
+
+// 遊戲邏輯控制
+function startGame() {
+    score = 0;
+    lives = 5;
+    currentSpeed = baseSpeed;
+    entities = [];
+    particles = [];
+    player.lane = 1;
+    player.dashTimer = 0;
+    player.magnetTimer = 0;
+    distanceSinceLastSpawn = 0;
+
+    updateUI();
+    pickNewQuestion();
+    
+    screen_start.classList.add('hidden');
+    screen_over.classList.add('hidden');
+    ui_qBox.classList.remove('hidden');
+    
+    gameState = 'playing';
+}
+
+function loseLife() {
+    if (player.dashTimer > 0) return; // 衝刺無敵狀態不扣血
+
+    lives--;
+    updateUI();
+    
+    // 紅色閃爍特效
+    screen_flash.style.opacity = 0.5;
+    setTimeout(() => { screen_flash.style.opacity = 0; }, 150);
+
+    if (lives <= 0) {
+        gameState = 'gameover';
+        ui_qBox.classList.add('hidden');
+        screen_over.classList.remove('hidden');
+        document.getElementById('finalScore').innerText = `最終分數: ${score}`;
+    }
+}
+
+function updateUI() {
+    ui_score.innerText = `分數: ${score}`;
+    ui_lives.innerText = '❤️'.repeat(lives) + '🖤'.repeat(5 - lives);
+}
+
+function pickNewQuestion() {
+    let old = currentQuestion;
+    // 確保不會連續出同一個單字
+    do {
+        currentQuestion = vocabList[Math.floor(Math.random() * vocabList.length)];
+    } while (old && currentQuestion.hanzi === old.hanzi && vocabList.length > 1);
+
+    ui_qHanzi.innerText = `請收集: ${currentQuestion.hanzi}`;
+    ui_qPinyin.innerText = currentQuestion.pinyin;
+}
+
+// 產生動態讚揚文字
+function addPraise(x, y) {
+    const text = praiseWords[Math.floor(Math.random() * praiseWords.length)];
+    particles.push({
+        text: text,
+        x: x,
+        y: y,
+        life: 60, // 存活幀數
+        maxLife: 60
+    });
+}
+
+// 實體生成邏輯
+function spawnEntities() {
+    // 依據速度計算生成間距，避免物件重疊
+    let spawnInterval = 180 + (currentSpeed * 10); 
+    distanceSinceLastSpawn += currentSpeed;
+
+    if (distanceSinceLastSpawn > spawnInterval) {
+        distanceSinceLastSpawn = 0;
+
+        let rand = Math.random();
+        if (rand < 0.7) {
+            // 70% 機率：生成題目排 (保證有一個正確答案，且不會三條跑道都是錯的)
+            spawnQuestionRow();
+        } else if (rand < 0.85) {
+            // 15% 機率：生成道具 (鞋子或磁鐵)
+            spawnPowerup();
+        } else {
+            // 15% 機率：生成殭屍障礙物
+            spawnZombies();
+        }
+    }
+}
+
+function spawnQuestionRow() {
+    let lanes = [0, 1, 2];
+    // 洗牌跑道
+    lanes.sort(() => Math.random() - 0.5);
+
+    // 1. 在第一個跑道放置正確答案
+    let correctLane = lanes[0];
+    entities.push({
+        type: 'food',
+        isCorrect: true,
+        item: currentQuestion,
+        lane: correctLane,
+        y: -50,
+        size: player.size
+    });
+
+    // 2. 在另外兩個跑道放置錯誤答案
+    let wrongOptions = vocabList.filter(v => v.hanzi !== currentQuestion.hanzi);
+    wrongOptions.sort(() => Math.random() - 0.5);
+
+    for (let i = 1; i <= 2; i++) {
+        entities.push({
+            type: 'food',
+            isCorrect: false,
+            item: wrongOptions[i-1],
+            lane: lanes[i],
+            y: -50,
+            size: player.size
+        });
+    }
+}
+
+function spawnPowerup() {
+    let lane = Math.floor(Math.random() * 3);
+    let type = Math.random() < 0.5 ? 'dash' : 'magnet';
+    entities.push({
+        type: 'powerup',
+        powerType: type,
+        emoji: type === 'dash' ? '👟' : '🧲',
+        lane: lane,
+        y: -50,
+        size: player.size
+    });
+}
+
+function spawnZombies() {
+    // 隨機產生 1~2 隻殭屍
+    let num = Math.random() < 0.7 ? 1 : 2;
+    let lanes = [0, 1, 2].sort(() => Math.random() - 0.5);
+    for(let i=0; i<num; i++){
+        entities.push({
+            type: 'zombie',
+            emoji: '🧟',
+            lane: lanes[i],
+            y: -50,
+            size: player.size
+        });
+    }
+}
+
+// 遊戲主迴圈
+function update() {
+    if (gameState !== 'playing') return;
+
+    // 隨分數提高速度 (平緩難度曲線)
+    currentSpeed = baseSpeed + Math.floor(score / 50) * 0.5;
+    // 限制最高速度，避免人類無法反應
+    if (currentSpeed > 15) currentSpeed = 15; 
+
+    // 道具計時器
+    if (player.dashTimer > 0) player.dashTimer--;
+    if (player.magnetTimer > 0) player.magnetTimer--;
+
+    spawnEntities();
+
+    // 更新實體並偵測碰撞
+    let playerXCenter = (player.lane * laneWidth) + (laneWidth / 2);
+    let playerYCenter = player.y + player.size / 2;
+    let hitRadius = player.size * 0.4; // 稍微縮小碰撞框，讓手感更好
+
+    for (let i = entities.length - 1; i >= 0; i--) {
+        let e = entities[i];
+        
+        // 磁鐵效果：將正確的食材吸過來
+        if (player.magnetTimer > 0 && e.type === 'food' && e.isCorrect) {
+            let targetX = player.lane; // 目標跑道
+            if (e.lane < targetX) e.lane += 0.05;
+            if (e.lane > targetX) e.lane -= 0.05;
+        }
+
+        e.y += currentSpeed;
+
+        // 計算實體當前中心點
+        let eXCenter = (e.lane * laneWidth) + (laneWidth / 2);
+        let eYCenter = e.y + e.size / 2;
+
+        // 簡單圓形碰撞偵測
+        let dist = Math.hypot(playerXCenter - eXCenter, playerYCenter - eYCenter);
+        
+        if (dist < hitRadius * 2) {
+            // 發生碰撞
+            if (e.type === 'food') {
+                if (e.isCorrect) {
+                    score += 10;
+                    addPraise(playerXCenter, player.y - 20);
+                    pickNewQuestion();
+                    updateUI();
+                } else {
+                    // 衝刺狀態下撞到錯誤食物直接撞碎，不扣血
+                    if (player.dashTimer === 0) loseLife();
+                }
+            } else if (e.type === 'zombie') {
+                if (player.dashTimer === 0) loseLife();
+            } else if (e.type === 'powerup') {
+                if (e.powerType === 'dash') {
+                    player.dashTimer = 300; // 5秒 (60fps)
+                    addPraise(playerXCenter, player.y - 20); // 顯示吃到道具的特效
+                }
+                if (e.powerType === 'magnet') {
+                    player.magnetTimer = 420; // 7秒
+                    addPraise(playerXCenter, player.y - 20);
+                }
+            }
+            entities.splice(i, 1); // 碰撞後移除物件
+            continue;
+        }
+
+        // 移除超出畫面的物件
+        if (e.y > height) {
+            entities.splice(i, 1);
+        }
+    }
+
+    // 更新粒子特效 (讚揚文字)
+    for (let i = particles.length - 1; i >= 0; i--) {
+        particles[i].life--;
+        particles[i].y -= 2; // 往上飄
+        if (particles[i].life <= 0) {
+            particles.splice(i, 1);
+        }
+    }
+}
+
+// 畫面渲染
+function draw() {
+    // 繪製超市地板 (網格線)
+    ctx.fillStyle = '#2a2a2a';
+    ctx.fillRect(0, 0, width, height);
+    
+    // 畫跑道分隔線
+    ctx.strokeStyle = '#444';
+    ctx.lineWidth = 4;
+    ctx.setLineDash([20, 20]); // 虛線效果
+    // 產生往下捲動的錯覺
+    let offset = (Date.now() / 20 * currentSpeed * 0.2) % 40;
+    ctx.lineDashOffset = -offset;
+    
+    ctx.beginPath();
+    ctx.moveTo(laneWidth, 0); ctx.lineTo(laneWidth, height);
+    ctx.moveTo(laneWidth * 2, 0); ctx.lineTo(laneWidth * 2, height);
+    ctx.stroke();
+    ctx.setLineDash([]); // 恢復實線
+
+    // 如果正在衝刺，畫面邊緣畫上金黃色速度線
+    if (player.dashTimer > 0) {
+        ctx.strokeStyle = 'rgba(255, 215, 0, 0.5)';
+        ctx.lineWidth = 10;
+        ctx.strokeRect(0, 0, width, height);
+    }
+    // 如果有磁鐵，畫上藍色光暈
+    if (player.magnetTimer > 0) {
+        ctx.strokeStyle = 'rgba(0, 191, 255, 0.5)';
+        ctx.lineWidth = 10;
+        ctx.strokeRect(0, 0, width, height);
+    }
+
+    // 繪製實體
+    ctx.font = `${player.size}px Arial`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    
+    for (let e of entities) {
+        let x = (e.lane * laneWidth) + (laneWidth / 2);
+        let y = e.y + e.size / 2;
+        let emoji = e.emoji || (e.item ? e.item.emoji : '❓');
+        ctx.fillText(emoji, x, y);
+    }
+
+    // 繪製玩家
+    let pX = (player.lane * laneWidth) + (laneWidth / 2);
+    let pY = player.y + player.size / 2;
+    ctx.globalAlpha = (player.dashTimer > 0 && player.dashTimer % 10 < 5) ? 0.5 : 1.0; // 無敵閃爍效果
+    ctx.fillText(player.emoji, pX, pY);
+    ctx.globalAlpha = 1.0;
+
+    // 繪製讚揚文字/特效
+    for (let p of particles) {
+        let alpha = p.life / p.maxLife;
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = '#FFD700'; // 金色
+        ctx.font = `bold 24px Arial`;
+        ctx.strokeStyle = 'black';
+        ctx.lineWidth = 3;
+        ctx.strokeText(p.text, p.x, p.y);
+        ctx.fillText(p.text, p.x, p.y);
+        ctx.globalAlpha = 1.0;
+    }
+}
+
+// 系統動畫迴圈
+function gameLoop() {
+    update();
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+// 啟動初始化
+window.onload = init;
+
+</script>
+</body>
+</html>
